@@ -1,165 +1,80 @@
 import streamlit as st
-import google.generativeai as genai
-import pdfplumber
 import docx2txt
+import pdfplumber
+import google.generativeai as genai
+import io
+import base64
 
-# --- Page Setup ---
-st.set_page_config(page_title="STAR Answer Formatter & Evaluator - Mudassar Hakim", layout="centered")
-st.title("🌟 STAR Interview Answer Formatter - Mudassar Hakim")
-st.markdown("""
-Use this app to **structure your behavioral answers** using the STAR framework and get them **scored using a real interview rubric**.
+# --- Streamlit UI Setup ---
+st.set_page_config(page_title="Gemini ATS Resume Optimizer", layout="centered")
+st.title("🤖 ATS Resume Optimizer with Gemini AI")
 
-> **🔐 Note**: Your Gemini API key is only used **temporarily in this session** and is **not stored or sent anywhere else**.
-
-👉 [How to get your Gemini API Key](https://aistudio.google.com/app/apikey)  
-""")
-
-# --- Gemini API Key ---
-api_key = st.text_input("Enter your Gemini API Key", type="password", help="Your key is only used during this session.")
-
-# --- Text Extraction Helper ---
-def extract_text_from_file(uploaded_file):
-    if uploaded_file.name.endswith(".pdf"):
-        with pdfplumber.open(uploaded_file) as pdf:
-            return "\n".join(page.extract_text() or "" for page in pdf.pages)
-    elif uploaded_file.name.endswith(".docx"):
-        return docx2txt.process(uploaded_file)
-    else:
-        return uploaded_file.read().decode("utf-8")
+# --- Step 1: API Key Input ---
+st.header("🔐 Step 1: Enter your Gemini API Key")
+api_key = st.text_input("Enter your Gemini API Key", type="password")
 
 if api_key:
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        st.success("✅ Gemini API connected successfully!")
+    genai.configure(api_key=api_key)
+    st.success("API Key validated!")
 
-        # --- Inputs ---
-        question = st.text_input("🎯 Behavioral Question")
-        answer = st.text_area("✍️ Paste your raw behavioral answer")
+    # --- File Upload Section ---
+    st.header("📄 Step 2: Upload Resume and Job Description")
+    col1, col2 = st.columns(2)
 
-        # --- Resume Input ---
-        st.markdown("### 📌 Include Your Resume (optional)")
-        resume_mode = st.radio("How do you want to provide your resume?", ["Paste", "Upload"])
-        resume_text = ""
+    with col1:
+        resume_file = st.file_uploader("Upload your Resume", type=["pdf", "docx", "txt"])
+    with col2:
+        jd_file = st.file_uploader("Upload Job Description", type=["pdf", "docx", "txt"])
 
-        if resume_mode == "Paste":
-            resume_text = st.text_area("Paste your Resume (optional)")
+    # --- Extract Text ---
+    def extract_text(uploaded_file):
+        if uploaded_file.name.endswith(".pdf"):
+            with pdfplumber.open(uploaded_file) as pdf:
+                return "\n".join(page.extract_text() or "" for page in pdf.pages)
+        elif uploaded_file.name.endswith(".docx"):
+            return docx2txt.process(uploaded_file)
         else:
-            resume_file = st.file_uploader("Upload Resume file", type=["pdf", "docx", "txt"], key="resume")
-            if resume_file:
-                resume_text = extract_text_from_file(resume_file)
+            return uploaded_file.read().decode("utf-8")
 
-        # --- Job Description Input ---
-        st.markdown("### 📄 Include the Job Description (optional)")
-        jd_mode = st.radio("How do you want to provide the job description?", ["Paste", "Upload"])
-        job_description = ""
+    if resume_file and jd_file:
+        resume_text = extract_text(resume_file)
+        jd_text = extract_text(jd_file)
 
-        if jd_mode == "Paste":
-            job_description = st.text_area("Paste the Job Description (optional)")
-        else:
-            jd_file = st.file_uploader("Upload JD file", type=["pdf", "docx", "txt"], key="jd")
-            if jd_file:
-                job_description = extract_text_from_file(jd_file)
+        st.success("📂 Files extracted successfully!")
 
-        # --- Buttons ---
-        col1, col2 = st.columns(2)
-        with col1:
-            format_clicked = st.button("🛠 Format with STAR")
-        with col2:
-            eval_clicked = st.button("📊 Evaluate Answer")
+        st.header("🤖 Step 3: Gemini Resume Optimization")
 
-        # --- Format with STAR ---
-        if format_clicked and question and answer:
-            with st.spinner("Formatting with STAR..."):
-                prompt = f"""
-You are a behavioral interview coach specializing in helping candidates prepare for interviews using the STAR (Situation, Task, Action, Result) method. When I provide you with a question and a candidate's answer, your task is to format the response according to the STAR method.
+        prompt = f"""
+You are a resume optimization assistant. I am applying for the following job role:
 
-Job Description (optional context):
-{job_description if job_description else 'N/A'}
+JOB DESCRIPTION:
+{jd_text}
 
-Resume (optional context):
-{resume_text if resume_text else 'N/A'}
+Here is my current resume:
+{resume_text}
 
-Please structure your response as follows:
+Please rewrite my resume to better match the job description using appropriate keywords, phrasing, and skills. Ensure it is still truthful and reflects the resume structure (Summary, Work Experience, Projects, Education, etc.). Return only the optimized resume text.
+        """
 
-- **Situation**: Describe the context or background of the scenario related to the question.
-- **Task**: Explain the specific challenge or responsibility the candidate faced.
-- **Action**: Detail the actions the candidate took to address the task.
-- **Result**: Summarize the outcomes of those actions, with a strong emphasis on **tangible, measurable results** such as:
-  - % improvements
-  - revenue or cost impact
-  - time savings
-  - user growth or satisfaction (e.g., NPS, CSAT)
-  - system performance gains (e.g., latency, uptime)
-  - team-level outcomes (e.g., attrition reduction, hiring velocity)
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            optimized_resume = response.text
 
-If such metrics are already present in the answer, **extract and highlight them clearly**.  
-If the metrics are not explicitly mentioned, **infer reasonable, plausible metrics** based on the scenario and label them as _(estimated)_.
+            st.text_area("📝 Optimized Resume", value=optimized_resume, height=500)
 
----
+            # Download button
+            def convert_to_downloadable_file(text):
+                b64 = base64.b64encode(text.encode()).decode()
+                return f'<a href="data:file/txt;base64,{b64}" download="Optimized_Resume.txt">📥 Download Optimized Resume</a>'
 
-Input:
-Question: {question}  
-Candidate's Answer: {answer}  
+            st.markdown("### 📩 Step 4: Download Your Resume")
+            st.markdown(convert_to_downloadable_file(optimized_resume), unsafe_allow_html=True)
 
-Respond using the structure above to help clarify the candidate's response and emphasize outcome-driven thinking.
-"""
-                response = model.generate_content(prompt)
-                st.markdown("### ⭐ STAR-Formatted Answer")
-                st.write(response.text)
+        except Exception as e:
+            st.error(f"❌ Gemini API Error: {str(e)}")
 
-        # --- Evaluate Answer ---
-        if eval_clicked and answer:
-            with st.spinner("Scoring your answer..."):
-                eval_prompt = f"""
-You are a senior hiring manager tasked with evaluating a behavioral interview response. Please evaluate the following candidate answer based on the scoring criteria outlined below.
-
-Job Description (optional context):
-{job_description if job_description else 'N/A'}
-
-Resume (optional context):
-{resume_text if resume_text else 'N/A'}
-
-Answer:
-{answer}
-
-### Evaluation Criteria
-Please assign a score from 1 to 5 for each of the following areas, along with a brief comment justifying your score:
-
-1. **Situation Clarity**  
-   - Score (1-5):  
-   - Comments:
-
-2. **Task Clarity**  
-   - Score (1-5):  
-   - Comments:
-
-3. **Actions Taken** (leadership, initiative)  
-   - Score (1-5):  
-   - Comments:
-
-4. **Results** (impact, metrics)  
-   - Score (1-5):  
-   - Comments:
-
-5. **Alignment with Engineering Manager Role**  
-   - Score (1-5):  
-   - Comments:
-
-6. **Communication Clarity**  
-   - Score (1-5):  
-   - Comments:
-
-### Final Assessment
-- **Overall Score**: X / 30
-
-Please ensure that your feedback is concise and constructive, focusing on specific strengths and areas for improvement in the candidate's response.
-"""
-                eval_response = model.generate_content(eval_prompt)
-                st.markdown("### 🧾 Evaluation Scorecard")
-                st.write(eval_response.text)
-
-    except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+    else:
+        st.info("Please upload both your resume and job description.")
 else:
-    st.warning("Please enter your Gemini API key to begin.")
+    st.warning("🔑 Please enter a valid Gemini API Key to continue.")
