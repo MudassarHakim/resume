@@ -57,7 +57,7 @@ Please rewrite my resume to better match the job description using appropriate k
         """
 
         try:
-            model = genai.GenerativeModel('models/gemini-pro')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(prompt)
             optimized_resume = response.text
 
